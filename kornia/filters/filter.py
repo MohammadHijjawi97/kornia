@@ -396,8 +396,6 @@ def fft_conv(
           - an integer input truncates a fractional kernel to 0, as in :func:`~kornia.filters.filter2d`, and the
             result is in torch's default floating dtype (float32) instead of the input's
             (`#5155 <https://github.com/kornia/kornia/issues/5155>`_).
-          - with ``padding='valid'`` and a kernel taller or wider than the input, it returns a wrongly sized tensor
-            where :func:`~kornia.filters.filter2d` raises (`#5285 <https://github.com/kornia/kornia/issues/5285>`_).
 
     Args:
         input: Input tensor of shape :math:`(B, C, H, W)`.
@@ -412,7 +410,8 @@ def fft_conv(
             the convolution.
         padding: Padding strategy to use. Supported values are:
             ``'same'`` (output has the same spatial size as the input) or
-            ``'valid'`` (no implicit padding).
+            ``'valid'`` (no implicit padding; as in :func:`~kornia.filters.filter2d`,
+            a kernel taller or wider than the input raises).
         behaviour: Convolution mode. If ``'corr'`` (default), performs
             cross-correlation. If ``'conv'``, performs true convolution
             by flipping the kernel spatially.
@@ -469,7 +468,7 @@ def fft_conv(
         f"Invalid behaviour mode, {behaviour}. Expected one of {_VALID_BEHAVIOUR}",
     )
 
-    _, c, _, _ = input.shape
+    _, c, h, w = input.shape
     kh, kw = kernel.shape[-2:]
 
     if str(behaviour).lower() == "conv":
@@ -488,6 +487,13 @@ def fft_conv(
         padding_shape = _compute_padding([kh, kw])
         input_padded = F.pad(input, padding_shape, mode=border_type)
     else:
+        # The kernel FFT below is taken at the input's size, which would truncate a larger kernel, and the crop to
+        # the valid region would then slice from the end.
+        KORNIA_CHECK(
+            kh <= h and kw <= w,
+            "With padding='valid', the kernel must not be taller or wider than the input. "
+            f"Got kernel size ({kh}, {kw}) and input size ({h}, {w}).",
+        )
         input_padded = input
 
     padded_h, padded_w = input_padded.shape[-2:]

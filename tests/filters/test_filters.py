@@ -1625,14 +1625,28 @@ class TestConventionsFilter2d(BaseTester):
         with pytest.raises(RuntimeError):
             filter3d(volume, kernel, "constant", normalized=True)
 
-    def test_wart_fft_conv_valid_padding_with_a_kernel_larger_than_the_input_5285(self, device, dtype):
-        """With padding='valid', a 7 x 3 kernel on a 5 x 6 image gives fft_conv a 4 x 4 output (#5285)."""
+    @pytest.mark.parametrize("kernel_size", [(6, 3), (7, 3), (3, 7), (5, 7), (6, 7)])
+    def test_convention_fft_conv_valid_padding_rejects_a_kernel_larger_than_the_input_5285(
+        self, kernel_size, device, dtype
+    ):
+        """With padding='valid', fft_conv rejects a kernel taller or wider than the image, as filter2d does (#5285)."""
         _fft_guard("fft_conv", device, dtype)
         image = _rand(1, 1, 5, 6, device=device, dtype=dtype)
-        kernel = _rand(1, 7, 3, device=device, dtype=dtype, seed=1)
+        kernel = _rand(1, *kernel_size, device=device, dtype=dtype, seed=1)
         with pytest.raises((RuntimeError, BaseError)):
             filter2d(image, kernel, "constant", padding="valid")
-        assert fft_conv(image, kernel, "constant", padding="valid").shape == (1, 1, 4, 4)
+        with pytest.raises(BaseError) as error:
+            fft_conv(image, kernel, "constant", padding="valid")
+        assert f"kernel size {kernel_size} and input size (5, 6)" in str(error.value)
+        # cropped to fit, up to the image's own size, the kernel is accepted and gives filter2d's valid output
+        fitting = kernel[:, :5, :6]
+        self.assert_close(
+            fft_conv(image, fitting, "constant", padding="valid"), filter2d(image, fitting, "constant", padding="valid")
+        )
+        # padding='same' pads first, so the large kernel still filters the whole image, as in filter2d
+        self.assert_close(
+            fft_conv(image, kernel, "constant", padding="same"), filter2d(image, kernel, "constant", padding="same")
+        )
 
 
 # (name, factory(device, dtype), shape) for non-square sizes, so every axis order is visible
